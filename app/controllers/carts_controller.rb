@@ -1,5 +1,5 @@
 class CartsController < ApplicationController
-  before_action :set_cart, only: [:show, :add_item, :remove_item]
+  before_action :set_cart, only: [:show, :create, :add_item, :remove_item]
 
   # GET /cart
   def show
@@ -61,12 +61,11 @@ class CartsController < ApplicationController
   end
 
   def current_or_create_cart
-    cart = Cart.find_by(id: session[:cart_id])
-    return cart if cart
+    return @cart if @cart
 
     cart = Cart.create!(total_price: 0)
     session[:cart_id] = cart.id
-    cart
+    @cart = cart
   end
 
   def find_product

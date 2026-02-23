@@ -140,6 +140,21 @@ RSpec.describe "/carts", type: :request do
       end
     end
 
+    context 'when removing the last product leaves the cart empty' do
+      before do
+        post '/cart', params: { product_id: product.id, quantity: 1 }, as: :json
+      end
+
+      it 'returns an empty cart with total_price 0' do
+        delete "/cart/#{product.id}", as: :json
+
+        expect(response).to have_http_status(:ok)
+        json = JSON.parse(response.body)
+        expect(json['products']).to eq([])
+        expect(json['total_price']).to eq(0.0)
+      end
+    end
+
     context 'when the product does not exist in the cart' do
       before do
         post '/cart', params: { product_id: product.id, quantity: 1 }, as: :json
