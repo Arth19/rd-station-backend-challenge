@@ -216,3 +216,71 @@ bundle exec rspec
 
 ### Como enviar seu projeto
 Salve seu código em um versionador de código (GitHub, GitLab, Bitbucket) e nos envie o link publico. Se achar necessário, informe no README as instruções para execução ou qualquer outra informação relevante para correção/entendimento da sua solução.
+
+---
+
+## Solução Implementada
+
+### Bug corrigido no projeto original
+- `config/database.yml` — Typo `*defaultp` corrigido para `*default` na seção `test`.
+
+### Estrutura criada
+
+**Models:**
+- `CartItem` — Tabela de junção entre `Cart` e `Product`, com `quantity`, validação de unicidade `[cart_id, product_id]` via índice único no banco, e métodos `unit_price` / `total_price`.
+- `Cart` — Expandido com associations (`has_many :cart_items`, `has_many :products through`), campos `abandoned` e `last_interaction_at`, scopes para carrinhos abandonados, e métodos de negócio (`add_item`, `remove_item`, `touch_interaction`, `mark_as_abandoned`).
+- `Product` — Adicionada association `has_many :cart_items`.
+
+**Migrações:**
+- `CreateCartItems` — FK para `carts` e `products`, `quantity` (not null, default 0), índice único composto.
+- `AddAbandonedFieldsToCarts` — `abandoned` (boolean, default false) e `last_interaction_at` (datetime, default `CURRENT_TIMESTAMP`).
+- `AddIndexToCartsAbandonedFields` — Índice composto `[:abandoned, :last_interaction_at]` para performance das queries do Job.
+
+**Controller (`CartsController`):**
+- `GET /cart` — Lista itens do carrinho da sessão (404 se não existir).
+- `POST /cart` — Cria carrinho se necessário, adiciona produto (201).
+- `POST /cart/add_item` — Incrementa quantidade ou adiciona novo item.
+- `DELETE /cart/:product_id` — Remove produto com validações em cascata.
+- Tratamento de erros: produto inexistente (404), quantidade inválida (422), produto não está no carrinho (404).
+
+**Job (`MarkCartAsAbandonedJob`):**
+- Marca carrinhos sem interação há 3+ horas como abandonados (`update_all` — 1 query SQL).
+- Remove carrinhos abandonados há 7+ dias (`find_each(&:destroy!)` — em batches, respeitando `dependent: :destroy`).
+- Agendado via `sidekiq-scheduler` para rodar a cada 1 hora.
+
+### Execução com Docker
+
+```bash
+# Subir a aplicação completa (web + banco + redis + sidekiq)
+docker compose up web sidekiq
+
+# Rodar os testes
+docker compose run test
+```
+
+### Execução local
+
+```bash
+bundle install
+bin/rails db:create db:migrate
+bundle exec sidekiq   # em outro terminal
+bin/rails server
+bundle exec rspec     # para rodar os testes
+```
+
+### Testes — 62 specs, 0 failures
+
+- **Gems de teste adicionadas:** `factory_bot_rails`, `shoulda-matchers`
+- **Factories:** `product`, `cart` (alias `shopping_cart`), `cart_item`
+- Testes existentes preservados integralmente
+- Testes pendentes (`pending`) implementados
+- Cobertura: models, requests (integração), routing, job
+
+### Decisões técnicas
+
+1. **`CartItem` como model/tabela separada** — Integridade referencial via FK, queries SQL eficientes, índice único para evitar duplicatas no banco.
+2. **`recalculate_total!` com SQL aggregation** — `joins(:product).sum('products.price * cart_items.quantity')` em vez de carregar records na memória Ruby.
+3. **`update_all` no Job** para marcação em massa — 1 SQL UPDATE ao invés de N queries individuais.
+4. **Sem Service Objects** — O controller é thin, a lógica de negócio está no model. Para 4 actions simples, a camada extra adicionaria indireção sem benefício.
+5. **Sem Serializer externo** — `as_json_response` tem 12 linhas e é co-localizado com o domínio. Não justifica dependência adicional.
+6. **Validações em camadas** — Controller (produto existe, quantidade > 0) + Model (numericality, uniqueness) + Banco (FK, unique index, not null).
